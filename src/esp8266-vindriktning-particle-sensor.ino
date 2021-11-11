@@ -5,6 +5,8 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiManager.h>
+#include <WiFiUdp.h>
+#include <coap-simple.h>
 
 #include "Config.h"
 #include "SerialCom.h"
@@ -18,10 +20,11 @@ WiFiManager wifiManager;
 WiFiClient wifiClient;
 PubSubClient mqttClient;
 
-WiFiManagerParameter custom_mqtt_server("server", "mqtt server", Config::mqtt_server, sizeof(Config::mqtt_server));
+WiFiManagerParameter custom_mqtt_server("server", "MQTT server", Config::mqtt_server, sizeof(Config::mqtt_server));
 WiFiManagerParameter custom_mqtt_user("user", "MQTT username", Config::username, sizeof(Config::username));
 WiFiManagerParameter custom_mqtt_pass("pass", "MQTT password", Config::password, sizeof(Config::password));
 WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", Config::mqtt_topic, sizeof(Config::mqtt_topic));
+WiFiManagerParameter custom_coap_server("coapserver", "Coap server", Config::coap_server, sizeof(Config::coap_server));
 
 uint32_t lastMqttConnectionAttempt = 0;
 const uint16_t mqttConnectionInterval = 60000; // 1 minute = 60 seconds = 60000 milliseconds
@@ -33,12 +36,21 @@ char identifier[24];
 /**#define FIRMWARE_PREFIX "esp8266-vindriktning-particle-sensor"*/
 #define AVAILABILITY_ONLINE "{ \"state\" : \"online\" }"
 #define AVAILABILITY_OFFLINE "{ \"state\" : \"offline\" }"
-//char MQTT_TOPIC_AVAILABILITY[128];
 char MQTT_TOPIC_STATE[128];
-//char MQTT_TOPIC_COMMAND[128];
 
-//char MQTT_TOPIC_AUTOCONF_WIFI_SENSOR[128];
-//char MQTT_TOPIC_AUTOCONF_PM25_SENSOR[128];
+// CoAP client response callback
+void callback_response(CoapPacket &packet, IPAddress ip, int port);
+
+// CoAP server endpoint url callback
+void callback_light(CoapPacket &packet, IPAddress ip, int port);
+
+// UDP and CoAP class
+WiFiUDP udp;
+Coap coap(udp);
+
+IPAddress coapAddress;
+bool coapSet = false;
+boolean mqttSet = false;
 
 bool shouldSaveConfig = false;
 
@@ -61,10 +73,6 @@ void setup() {
     delay(3000);
 
     snprintf(identifier, sizeof(identifier), "VINDRIKTNING-%X", ESP.getChipId());
-    //snprintf(MQTT_TOPIC_AVAILABILITY, 127, "%s/%s/status", FIRMWARE_PREFIX, identifier);
-    //snprintf(MQTT_TOPIC_COMMAND, 127, "%s/%s/command", FIRMWARE_PREFIX, identifier);
-    //snprintf(MQTT_TOPIC_AUTOCONF_PM25_SENSOR, 127, "homeassistant/sensor/%s/%s_pm25/config", FIRMWARE_PREFIX, identifier);
-    //snprintf(MQTT_TOPIC_AUTOCONF_WIFI_SENSOR, 127, "homeassistant/sensor/%s/%s_wifi/config", FIRMWARE_PREFIX, identifier);
 
     WiFi.hostname(identifier);
 
@@ -72,6 +80,9 @@ void setup() {
   
     setupWifi();
     setupOTA();
+    
+    mqttSet = strlen(Config::mqtt_server) > 0;
+    coapSet = coapAddress.fromString(Config::coap_server);
 
     snprintf(MQTT_TOPIC_STATE, 127, Config::mqtt_topic, identifier);
     Serial.printf("MQTT server: %s\n", Config::mqtt_server);
@@ -81,6 +92,8 @@ void setup() {
     mqttClient.setKeepAlive(10);
     mqttClient.setBufferSize(2048);
     mqttClient.setCallback(mqttCallback);
+
+    Serial.printf("COAP server: %s\n", Config::coap_server);
 
     Serial.printf("Hostname: %s\n", identifier);
     Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
@@ -131,6 +144,7 @@ void loop() {
       strcpy(Config::username, custom_mqtt_user.getValue());
       strcpy(Config::password, custom_mqtt_pass.getValue());
       strcpy(Config::mqtt_topic, custom_mqtt_topic.getValue());
+      strcpy(Config::coap_server, custom_coap_server.getValue());
       Config::save();
       snprintf(MQTT_TOPIC_STATE, 127, Config::mqtt_topic, identifier);
       Serial.printf("MQTT Topic State: %s\n", MQTT_TOPIC_STATE);
@@ -149,21 +163,25 @@ void loop() {
         }
     }
 
-    if (!mqttClient.connected() && currentMillis - lastMqttConnectionAttempt >= mqttConnectionInterval) {
+    if (mqttSet && !mqttClient.connected() && currentMillis - lastMqttConnectionAttempt >= mqttConnectionInterval) {
         lastMqttConnectionAttempt = currentMillis;
         printf("Reconnect mqtt\n");
         mqttReconnect();
     }
+    
 }
 
 void setupWifi() {
-    wifiManager.setDebugOutput(false);
-    wifiManager.setSaveConfigCallback(saveConfigCallback);
+    wifiManager.setDebugOutput(false);    
 
     wifiManager.addParameter(&custom_mqtt_server);
     wifiManager.addParameter(&custom_mqtt_user);
     wifiManager.addParameter(&custom_mqtt_pass);
     wifiManager.addParameter(&custom_mqtt_topic);
+    wifiManager.addParameter(&custom_coap_server);
+
+    wifiManager.setSaveConfigCallback(saveConfigCallback);
+    wifiManager.setPreSaveConfigCallback(saveConfigCallback);
 
     WiFi.hostname(identifier);
     wifiManager.autoConnect(identifier);
@@ -173,6 +191,7 @@ void setupWifi() {
     strcpy(Config::username, custom_mqtt_user.getValue());
     strcpy(Config::password, custom_mqtt_pass.getValue());
     strcpy(Config::mqtt_topic, custom_mqtt_topic.getValue());
+    strcpy(Config::coap_server, custom_coap_server.getValue());
 
     if (shouldSaveConfig) {
         Config::save();
@@ -226,53 +245,30 @@ void publishState() {
     stateJson["wifi"] = wifiJson.as<JsonObject>();
 
     serializeJson(stateJson, payload);
-    mqttClient.publish(&MQTT_TOPIC_STATE[0], &payload[0], true);
+    if (mqttSet){
+        printf("Send state to MQTT\n");
+        mqttClient.publish(&MQTT_TOPIC_STATE[0], &payload[0], true);
+    }
+    if (coapSet){
+        printf("Send state to COAP\n");
+        char coapPayload[16];
+        sprintf(coapPayload, "%X%u", ESP.getChipId(),   state.avgPM25) ;
+
+        coap.put(IPAddress(192, 168, 1, 158), 5683, "dr", coapPayload);
+    }
 }
 
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) { }
 
-/*void publishAutoConfig() {
-    char mqttPayload[2048];
-    DynamicJsonDocument device(256);
-    DynamicJsonDocument autoconfPayload(1024);
-    StaticJsonDocument<64> identifiersDoc;
-    JsonArray identifiers = identifiersDoc.to<JsonArray>();
+// CoAP client response callback
+void callback_response(CoapPacket &packet, IPAddress ip, int port) {
+  Serial.println("[Coap Response got]");
 
-    identifiers.add(identifier);
+  char p[packet.payloadlen + 1];
+  memcpy(p, packet.payload, packet.payloadlen);
+  p[packet.payloadlen] = NULL;
 
-    device["identifiers"] = identifiers;
-    device["manufacturer"] = "Ikea";
-    device["model"] = "VINDRIKTNING";
-    device["name"] = identifier;
-    device["sw_version"] = "2021.08.0";
+  Serial.println(p);
+}
 
-    autoconfPayload["device"] = device.as<JsonObject>();
-    autoconfPayload["availability_topic"] = MQTT_TOPIC_AVAILABILITY;
-    autoconfPayload["state_topic"] = MQTT_TOPIC_STATE;
-    autoconfPayload["name"] = identifier + String(" WiFi");
-    autoconfPayload["value_template"] = "{{value_json.wifi.rssi}}";
-    autoconfPayload["unique_id"] = identifier + String("_wifi");
-    autoconfPayload["unit_of_measurement"] = "dBm";
-    autoconfPayload["json_attributes_topic"] = MQTT_TOPIC_STATE;
-    autoconfPayload["json_attributes_template"] = "{\"ssid\": \"{{value_json.wifi.ssid}}\", \"ip\": \"{{value_json.wifi.ip}}\"}";
-    autoconfPayload["icon"] = "mdi:wifi";
-
-    serializeJson(autoconfPayload, mqttPayload);
-    mqttClient.publish(&MQTT_TOPIC_AUTOCONF_WIFI_SENSOR[0], &mqttPayload[0], true);
-
-    autoconfPayload.clear();
-
-    autoconfPayload["device"] = device.as<JsonObject>();
-    autoconfPayload["availability_topic"] = MQTT_TOPIC_AVAILABILITY;
-    autoconfPayload["state_topic"] = MQTT_TOPIC_STATE;
-    autoconfPayload["name"] = identifier + String(" PM 2.5");
-    autoconfPayload["unit_of_measurement"] = "μg/m³";
-    autoconfPayload["value_template"] = "{{value_json.pm25}}";
-    autoconfPayload["unique_id"] = identifier + String("_pm25");
-    autoconfPayload["icon"] = "mdi:air-filter";
-
-    serializeJson(autoconfPayload, mqttPayload);
-    mqttClient.publish(&MQTT_TOPIC_AUTOCONF_PM25_SENSOR[0], &mqttPayload[0], true);
-
-    autoconfPayload.clear();
-}*/
+void callback_response(CoapPacket &packet, IPAddress ip, int port);

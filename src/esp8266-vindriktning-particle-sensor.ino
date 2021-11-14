@@ -83,7 +83,8 @@ void setup() {
     setupOTA();
     
     mqttSet = strlen(Config::mqtt_server) > 0;
-    coapSet = coapAddress.fromString(Config::coap_server);
+
+    coapSet = WiFi.hostByName(Config::coap_server, coapAddress);
 
     snprintf(MQTT_TOPIC_STATE, 127, Config::mqtt_topic, identifier);
     Serial.printf("MQTT server: %s\n", Config::mqtt_server);
@@ -222,7 +223,7 @@ void loadConfig(){
     if (strlen(Config::password) > 0 ) custom_mqtt_pass.setValue(Config::password, strlen(Config::password));
     if (strlen(Config::mqtt_topic) > 0 ) custom_mqtt_topic.setValue(Config::mqtt_topic, strlen(Config::mqtt_topic));
     if (strlen(Config::coap_server) > 0 ){
-        coapSet = coapAddress.fromString(Config::coap_server);
+        coapSet = WiFi.hostByName(Config::coap_server, coapAddress);
         custom_coap_server.setValue(Config::coap_server, strlen(Config::coap_server));
     } else
         coapSet = false;
@@ -276,7 +277,7 @@ void publishState() {
         char coapPayload[16];
         sprintf(coapPayload, "%X%u", ESP.getChipId(),   state.avgPM25) ;
 
-        coap.put(IPAddress(192, 168, 1, 158), 5683, "dr", coapPayload);
+        coap.put(coapAddress, 5683, "VINDRIKTNING", coapPayload);
     }
 }
 

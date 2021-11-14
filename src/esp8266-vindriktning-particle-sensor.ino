@@ -152,8 +152,7 @@ void loop() {
       Serial.printf("MQTT Topic State: %s\n", MQTT_TOPIC_STATE);
       //reset save flag
       shouldSaveConfig = false;
-      // restart after save new 
-      ESP.restart();    
+      loadConfig();
     }
 
     const uint32_t currentMillis = millis();
@@ -214,11 +213,18 @@ void setupWifi() {
 void loadConfig(){
 
     Config::load;
-    if (strlen(Config::mqtt_server) > 0 ) custom_mqtt_server.setValue(Config::mqtt_server, strlen(Config::mqtt_server));
+    if (strlen(Config::mqtt_server) > 0 ){
+        mqttSet = true;
+        custom_mqtt_server.setValue(Config::mqtt_server, strlen(Config::mqtt_server));
+    }
     if (strlen(Config::username) > 0 ) custom_mqtt_user.setValue(Config::username, strlen(Config::username));
     if (strlen(Config::password) > 0 ) custom_mqtt_pass.setValue(Config::password, strlen(Config::password));
     if (strlen(Config::mqtt_topic) > 0 ) custom_mqtt_topic.setValue(Config::mqtt_topic, strlen(Config::mqtt_topic));
-    if (strlen(Config::coap_server) > 0 ) custom_coap_server.setValue(Config::coap_server, strlen(Config::coap_server));
+    if (strlen(Config::coap_server) > 0 ){
+        coapSet = coapAddress.fromString(Config::coap_server);
+        custom_coap_server.setValue(Config::coap_server, strlen(Config::coap_server));
+    } 
+
 }
 
 void resetWifiSettingsAndReboot() {

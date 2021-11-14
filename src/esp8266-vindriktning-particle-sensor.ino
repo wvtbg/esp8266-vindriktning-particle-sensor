@@ -38,12 +38,6 @@ char identifier[24];
 #define AVAILABILITY_OFFLINE "{ \"state\" : \"offline\" }"
 char MQTT_TOPIC_STATE[128];
 
-// CoAP client response callback
-void callback_response(CoapPacket &packet, IPAddress ip, int port);
-
-// CoAP server endpoint url callback
-void callback_light(CoapPacket &packet, IPAddress ip, int port);
-
 // UDP and CoAP class
 WiFiUDP udp;
 Coap coap(udp);
@@ -51,6 +45,13 @@ Coap coap(udp);
 IPAddress coapAddress;
 bool coapSet = false;
 boolean mqttSet = false;
+
+// CoAP client response callback
+void callback_response(CoapPacket &packet, IPAddress ip, int port);
+
+// CoAP server endpoint url callback
+void callback_light(CoapPacket &packet, IPAddress ip, int port);
+
 
 bool shouldSaveConfig = false;
 
@@ -77,6 +78,12 @@ void setup() {
     WiFi.hostname(identifier);
 
     Config::load();
+    
+    if (strlen(Config::mqtt_server) > 0 ) custom_mqtt_server.setValue(Config::mqtt_server, strlen(Config::mqtt_server));
+    if (strlen(Config::username) > 0 ) custom_mqtt_user.setValue(Config::username, strlen(Config::username));
+    if (strlen(Config::password) > 0 ) custom_mqtt_pass.setValue(Config::password, strlen(Config::password));
+    if (strlen(Config::mqtt_topic) > 0 ) custom_mqtt_topic.setValue(Config::mqtt_topic, strlen(Config::mqtt_topic));
+    if (strlen(Config::coap_server) > 0 ) custom_coap_server.setValue(Config::coap_server, strlen(Config::coap_server));
   
     setupWifi();
     setupOTA();
@@ -145,12 +152,14 @@ void loop() {
       strcpy(Config::password, custom_mqtt_pass.getValue());
       strcpy(Config::mqtt_topic, custom_mqtt_topic.getValue());
       strcpy(Config::coap_server, custom_coap_server.getValue());
+      
       Config::save();
       snprintf(MQTT_TOPIC_STATE, 127, Config::mqtt_topic, identifier);
       Serial.printf("MQTT Topic State: %s\n", MQTT_TOPIC_STATE);
       //reset save flag
       shouldSaveConfig = false;
- 
+      // restart after save new 
+      ESP.restart();    
     }
 
     const uint32_t currentMillis = millis();
@@ -182,6 +191,7 @@ void setupWifi() {
 
     wifiManager.setSaveConfigCallback(saveConfigCallback);
     wifiManager.setPreSaveConfigCallback(saveConfigCallback);
+
 
     WiFi.hostname(identifier);
     wifiManager.autoConnect(identifier);

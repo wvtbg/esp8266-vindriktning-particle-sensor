@@ -77,14 +77,8 @@ void setup() {
 
     WiFi.hostname(identifier);
 
-    Config::load();
+    loadConfig();
     
-    if (strlen(Config::mqtt_server) > 0 ) custom_mqtt_server.setValue(Config::mqtt_server, strlen(Config::mqtt_server));
-    if (strlen(Config::username) > 0 ) custom_mqtt_user.setValue(Config::username, strlen(Config::username));
-    if (strlen(Config::password) > 0 ) custom_mqtt_pass.setValue(Config::password, strlen(Config::password));
-    if (strlen(Config::mqtt_topic) > 0 ) custom_mqtt_topic.setValue(Config::mqtt_topic, strlen(Config::mqtt_topic));
-    if (strlen(Config::coap_server) > 0 ) custom_coap_server.setValue(Config::coap_server, strlen(Config::coap_server));
-  
     setupWifi();
     setupOTA();
     
@@ -211,10 +205,20 @@ void setupWifi() {
         // For some reason, the read values get overwritten in this function
         // To combat this, we just reload the config
         // This is most likely a logic error which could be fixed otherwise
-        Config::load();
+        loadConfig();
     }
     
     wifiManager.startWebPortal();
+}
+
+void loadConfig(){
+
+    Config::load;
+    if (strlen(Config::mqtt_server) > 0 ) custom_mqtt_server.setValue(Config::mqtt_server, strlen(Config::mqtt_server));
+    if (strlen(Config::username) > 0 ) custom_mqtt_user.setValue(Config::username, strlen(Config::username));
+    if (strlen(Config::password) > 0 ) custom_mqtt_pass.setValue(Config::password, strlen(Config::password));
+    if (strlen(Config::mqtt_topic) > 0 ) custom_mqtt_topic.setValue(Config::mqtt_topic, strlen(Config::mqtt_topic));
+    if (strlen(Config::coap_server) > 0 ) custom_coap_server.setValue(Config::coap_server, strlen(Config::coap_server));
 }
 
 void resetWifiSettingsAndReboot() {

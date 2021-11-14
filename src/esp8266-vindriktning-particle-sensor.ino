@@ -211,8 +211,8 @@ void setupWifi() {
 }
 
 void loadConfig(){
+    Config::load();
 
-    Config::load;
     if (strlen(Config::mqtt_server) > 0 ){
         mqttSet = true;
         custom_mqtt_server.setValue(Config::mqtt_server, strlen(Config::mqtt_server));

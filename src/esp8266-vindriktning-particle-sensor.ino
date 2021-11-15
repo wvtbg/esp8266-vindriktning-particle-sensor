@@ -275,7 +275,7 @@ void publishState() {
     if (coapSet){
         printf("Send state to COAP\n");
         char coapPayload[16];
-        sprintf(coapPayload, "%X%u", ESP.getChipId(),   state.avgPM25) ;
+        sprintf(coapPayload, "%X%04x", ESP.getChipId(), state.avgPM25) ;
 
         coap.put(coapAddress, 5683, "VINDRIKTNING", coapPayload);
     }

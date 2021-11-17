@@ -157,6 +157,10 @@ void loop() {
     }
 
     const uint32_t currentMillis = millis();
+    // reset previous for time flip over after 50 days
+    if (currentMillis < statusPublishPreviousMillis){
+        statusPublishPreviousMillis = currentMillis;
+    }
     if (currentMillis - statusPublishPreviousMillis >= statusPublishInterval) {
         statusPublishPreviousMillis = currentMillis;
 

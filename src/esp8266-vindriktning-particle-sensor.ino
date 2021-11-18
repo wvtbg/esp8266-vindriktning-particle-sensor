@@ -280,7 +280,8 @@ void publishState() {
     if (coapSet){
         printf("Send state to COAP\n");
         char coapPayload[16];
-        sprintf(coapPayload, "%X%04x", ESP.getChipId(), state.avgPM25) ;
+        // serial (6 last mac) version (1) ppm 2.5 (2D)
+        sprintf(coapPayload, "%X1%04x", ESP.getChipId(), state.avgPM25) ;
 
         coap.put(coapAddress, 5683, "VINDRIKTNING", coapPayload);
     }

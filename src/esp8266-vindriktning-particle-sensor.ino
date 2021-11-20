@@ -27,10 +27,10 @@ WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", Config::mqtt_topic
 WiFiManagerParameter custom_coap_server("coapserver", "Coap server", Config::coap_server, sizeof(Config::coap_server));
 
 uint32_t lastMqttConnectionAttempt = 0;
-const uint16_t mqttConnectionInterval = 60000; // 1 minute = 60 seconds = 60000 milliseconds
+const uint16_t mqttConnectionInterval = 60000; // 1 minute = 60 seconds = 60_000 milliseconds
 
 uint32_t statusPublishPreviousMillis = 0;
-const uint16_t statusPublishInterval = 30000; // 30 seconds = 30000 milliseconds
+const uint32_t statusPublishInterval = 300000; // 5 minutes = 300 seconds = 300_000 milliseconds
 
 char identifier[24];
 /**#define FIRMWARE_PREFIX "esp8266-vindriktning-particle-sensor"*/
@@ -157,6 +157,11 @@ void loop() {
     }
 
     const uint32_t currentMillis = millis();
+    // reset previous for time flip over after 50 days
+    if (currentMillis < statusPublishPreviousMillis){
+        printf("Clock flip to zero reset previous millis");
+        statusPublishPreviousMillis = currentMillis;
+    }
     if (currentMillis - statusPublishPreviousMillis >= statusPublishInterval) {
         statusPublishPreviousMillis = currentMillis;
 
@@ -275,7 +280,8 @@ void publishState() {
     if (coapSet){
         printf("Send state to COAP\n");
         char coapPayload[16];
-        sprintf(coapPayload, "%X%04x", ESP.getChipId(), state.avgPM25) ;
+        // serial (6 last mac) version (1) ppm 2.5 (2D)
+        sprintf(coapPayload, "%X01%04x", ESP.getChipId(), state.avgPM25) ;
 
         coap.put(coapAddress, 5683, "VINDRIKTNING", coapPayload);
     }

@@ -12,7 +12,16 @@
 #include "SerialCom.h"
 #include "Types.h"
 
+// for ds18b20
+#include <OneWire.h> 
+#include <DallasTemperature.h>
+
+#define ONE_WIRE_BUS D7
+OneWire oneWire(ONE_WIRE_BUS); 
+DallasTemperature sensors(&oneWire);
+
 particleSensorState_t state;
+float temperature = 0;
 
 uint8_t mqttRetryCounter = 0;
 
@@ -27,10 +36,10 @@ WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", Config::mqtt_topic
 WiFiManagerParameter custom_coap_server("coapserver", "Coap server", Config::coap_server, sizeof(Config::coap_server));
 
 uint32_t lastMqttConnectionAttempt = 0;
-const uint16_t mqttConnectionInterval = 60000; // 1 minute = 60 seconds = 60_000 milliseconds
+const uint16_t mqttConnectionInterval = 600000; // 10 minute = 600 seconds = 600_000 milliseconds
 
 uint32_t statusPublishPreviousMillis = 0;
-const uint32_t statusPublishInterval = 300000; // 5 minutes = 300 seconds = 300_000 milliseconds
+const uint32_t statusPublishInterval = 30000; // 5 minutes = 300 seconds = 300_000 milliseconds
 
 char identifier[24];
 /**#define FIRMWARE_PREFIX "esp8266-vindriktning-particle-sensor"*/
@@ -62,6 +71,7 @@ void saveConfigCallback() {
 void setup() {
     Serial.begin(115200);
     SerialCom::setup();
+    sensors.begin(); 
 
     Serial.println("\n");
     Serial.println("Hello from esp8266-vindriktning-particle-sensor");
@@ -137,6 +147,7 @@ void setupOTA() {
 void loop() {
     ArduinoOTA.handle();
     SerialCom::handleUart(state);
+    sensors.requestTemperatures();
     mqttClient.loop();
     wifiManager.process();
     if(shouldSaveConfig){
@@ -162,13 +173,11 @@ void loop() {
         printf("Clock flip to zero reset previous millis");
         statusPublishPreviousMillis = currentMillis;
     }
-    if (currentMillis - statusPublishPreviousMillis >= statusPublishInterval) {
+    
+    if (state.valid && currentMillis - statusPublishPreviousMillis >= statusPublishInterval) {
         statusPublishPreviousMillis = currentMillis;
-
-        if (state.valid) {
-            printf("Publish state\n");
-            publishState();
-        }
+        printf("Publish state\n");
+        publishState();
     }
 
     if (mqttSet && !mqttClient.connected() && currentMillis - lastMqttConnectionAttempt >= mqttConnectionInterval) {
@@ -263,12 +272,17 @@ void publishState() {
     DynamicJsonDocument wifiJson(192);
     DynamicJsonDocument stateJson(604);
     char payload[256];
+    temperature = sensors.getTempCByIndex(0);
 
     wifiJson["ssid"] = WiFi.SSID();
     wifiJson["ip"] = WiFi.localIP().toString();
     wifiJson["rssi"] = WiFi.RSSI();
 
     stateJson["pm25"] = state.avgPM25;
+    if (temperature != 0){
+        printf("Temperature %02f\n", temperature);
+        stateJson["temperature"] = temperature;
+    }    
 
     stateJson["wifi"] = wifiJson.as<JsonObject>();
 
@@ -279,9 +293,9 @@ void publishState() {
     }
     if (coapSet){
         printf("Send state to COAP\n");
-        char coapPayload[16];
+        char coapPayload[6];
         // serial (6 last mac) version (1) ppm 2.5 (2D)
-        sprintf(coapPayload, "%X01%04x", ESP.getChipId(), state.avgPM25) ;
+        sprintf(coapPayload, "%X02%02x%02x", ESP.getChipId(), *(unsigned int*)&temperature, state.avgPM25) ;
 
         coap.put(coapAddress, 5683, "VINDRIKTNING", coapPayload);
     }

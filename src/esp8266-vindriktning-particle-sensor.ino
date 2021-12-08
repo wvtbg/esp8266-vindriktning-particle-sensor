@@ -33,10 +33,16 @@ uint32_t statusPublishPreviousMillis = 0;
 const uint32_t statusPublishInterval = 300000; // 5 minutes = 300 seconds = 300_000 milliseconds
 
 char identifier[24];
-/**#define FIRMWARE_PREFIX "esp8266-vindriktning-particle-sensor"*/
+#define FIRMWARE_PREFIX "esp8266-vindriktning-particle-sensor"
 #define AVAILABILITY_ONLINE "{ \"state\" : \"online\" }"
 #define AVAILABILITY_OFFLINE "{ \"state\" : \"offline\" }"
+char MQTT_TOPIC_AVAILABILITY[128];
 char MQTT_TOPIC_STATE[128];
+char MQTT_TOPIC_COMMAND[128];
+
+char MQTT_TOPIC_AUTOCONF_WIFI_SENSOR[128];
+char MQTT_TOPIC_AUTOCONF_PM25_SENSOR[128];
+
 
 // UDP and CoAP class
 WiFiUDP udp;
@@ -245,10 +251,10 @@ void mqttReconnect() {
     for (uint8_t attempt = 0; attempt < 3; ++attempt) {
         if (mqttClient.connect(identifier, Config::username, Config::password, MQTT_TOPIC_STATE, 1, true, AVAILABILITY_OFFLINE)) {
             mqttClient.publish(MQTT_TOPIC_STATE, AVAILABILITY_ONLINE, true);
-            //publishAutoConfig();
+            publishAutoConfig();
 
             // Make sure to subscribe after polling the status so that we never execute commands with the default data
-            //mqttClient.subscribe(MQTT_TOPIC_COMMAND);
+            mqttClient.subscribe(MQTT_TOPIC_COMMAND);
             break;
         }
         delay(5000);
@@ -301,3 +307,49 @@ void callback_response(CoapPacket &packet, IPAddress ip, int port) {
 }
 
 void callback_response(CoapPacket &packet, IPAddress ip, int port);
+
+void publishAutoConfig() {
+    char mqttPayload[2048];
+    DynamicJsonDocument device(256);
+    DynamicJsonDocument autoconfPayload(1024);
+    StaticJsonDocument<64> identifiersDoc;
+    JsonArray identifiers = identifiersDoc.to<JsonArray>();
+
+    identifiers.add(identifier);
+
+    device["identifiers"] = identifiers;
+    device["manufacturer"] = "Ikea";
+    device["model"] = "VINDRIKTNING";
+    device["name"] = identifier;
+    device["sw_version"] = "2021.08.0";
+
+    autoconfPayload["device"] = device.as<JsonObject>();
+    autoconfPayload["availability_topic"] = MQTT_TOPIC_AVAILABILITY;
+    autoconfPayload["state_topic"] = MQTT_TOPIC_STATE;
+    autoconfPayload["name"] = identifier + String(" WiFi");
+    autoconfPayload["value_template"] = "{{value_json.wifi.rssi}}";
+    autoconfPayload["unique_id"] = identifier + String("_wifi");
+    autoconfPayload["unit_of_measurement"] = "dBm";
+    autoconfPayload["json_attributes_topic"] = MQTT_TOPIC_STATE;
+    autoconfPayload["json_attributes_template"] = "{\"ssid\": \"{{value_json.wifi.ssid}}\", \"ip\": \"{{value_json.wifi.ip}}\"}";
+    autoconfPayload["icon"] = "mdi:wifi";
+
+    serializeJson(autoconfPayload, mqttPayload);
+    mqttClient.publish(&MQTT_TOPIC_AUTOCONF_WIFI_SENSOR[0], &mqttPayload[0], true);
+
+    autoconfPayload.clear();
+
+    autoconfPayload["device"] = device.as<JsonObject>();
+    autoconfPayload["availability_topic"] = MQTT_TOPIC_AVAILABILITY;
+    autoconfPayload["state_topic"] = MQTT_TOPIC_STATE;
+    autoconfPayload["name"] = identifier + String(" PM 2.5");
+    autoconfPayload["unit_of_measurement"] = "μg/m³";
+    autoconfPayload["value_template"] = "{{value_json.pm25}}";
+    autoconfPayload["unique_id"] = identifier + String("_pm25");
+    autoconfPayload["icon"] = "mdi:air-filter";
+
+    serializeJson(autoconfPayload, mqttPayload);
+    mqttClient.publish(&MQTT_TOPIC_AUTOCONF_PM25_SENSOR[0], &mqttPayload[0], true);
+
+    autoconfPayload.clear();
+}
